@@ -14,7 +14,7 @@ dependencies = [
     "numpy",
     "scipy",
     "matplotlib>=3.8",
-    "sepia>=0.7",
+    "sepia @ git+https://github.com/lanl/SEPIA.git",
 ]
 
 [project.optional-dependencies]

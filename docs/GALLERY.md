@@ -60,3 +60,15 @@ They validate the SEPIA GP emulators against held-out HACC simulations.
 | ![Profiles z-sensitivity](plots/prof_profiles_all_z_sensitivity.png) | **Redshift sensitivity**: Profile evolution from z=0.5 to z=0 at fiducial parameters. |
 | ![Profiles vs Observations](plots/prof_profiles_emu_vs_obs_z0.png) | **Emulator vs Observations**: Cluster profiles compared to observational data from X-ray and SZ measurements. |
 | ![Profiles vs Observations (obs only)](plots/prof_profiles_emu_vs_obs_z0_obsonly_1.png) | **Observation overlay**: Same as above but focused on the observational data points and error bars. |
+
+## Cosmic Star Formation Rate (CSFR)
+
+| Plot | Description |
+|------|-------------|
+| ![CSFR Design](plots/csfr_cell5_1.png) | **Design-space scatter matrix**: Full 7-parameter Latin hypercube with CSFR-specific view. |
+| ![CSFR Ensemble](plots/csfr_cell7_2.png) | **CSFR ensemble**: All 110 simulations showing star formation rate density vs scale factor. |
+| ![CSFR Raw](plots/csfr_cell8_1.png) | **Single simulation CSFR**: Raw cosmic star formation rate for one simulation. |
+| ![CSFR Processed](plots/csfr_cell10_6.png) | **Processed CSFR data**: After NaN interpolation and mass cuts. |
+| ![CSFR PCA basis](plots/csfr_cell12.png) | **PCA basis function**: Leading principal component from SEPIA decomposition. |
+| ![CSFR Validation](plots/csfr_cell14_2.png) | **Validation**: Emulator predictions vs held-out test simulations for CSFR. |
+| ![CSFR Sensitivity](plots/csfr_cell16_1.png) | **Parameter sensitivity**: Per-parameter contribution to CSFR variation. |

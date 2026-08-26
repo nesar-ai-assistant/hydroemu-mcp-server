@@ -132,6 +132,18 @@ a checked-in `.mcp.json` already wires it into Claude Code.
 This server follows the same architecture as
 [spectra-mcp-server](https://github.com/HEP-KE/spectra-mcp-server):
 
+## Emulator Plots
+
+See the [full gallery](docs/GALLERY.md) for 24 validation, sensitivity, and
+comparison plots from the CosmoHydro training notebooks. Highlights:
+
+| | |
+|---|---|
+| ![GSMF Validation](docs/plots/emu_GSMF_multiz_valid_1.png) | ![Pk Sensitivity](docs/plots/emu_Pk_sensi.png) |
+| GSMF: emulator vs held-out simulations | P(k) suppression: per-parameter sensitivity |
+
+## Architecture (detailed)
+
 - `mcp_server/` is a **generic drop-in** MCP wrapper (copy between repos)
 - `tools/` contains the domain-specific science functions
 - `pyproject.toml` `[tool.mcp-server]` config wires them together

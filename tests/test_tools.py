@@ -228,14 +228,13 @@ def test_plot_single_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 _has_models = (MODELS_DIR / "GSMF_multiz" / "multivariate_model_z_index10.pkl").exists()
+_has_training_data = (MODELS_DIR / "GSMF_multiz" / "training_data.npz").exists()
 try:
     from sepia.SepiaModel import SepiaModel  # noqa: F401
     _has_sepia = True
 except (ImportError, ModuleNotFoundError):
     _has_sepia = False
-# Prediction requires models + sepia + training data arrays (not bundled in repo)
-# These tests are expected to fail until self-contained model pickles are available
-_can_predict = False  # TODO: enable when training data is bundled
+_can_predict = _has_models and _has_training_data and _has_sepia
 
 
 @pytest.mark.skipif(not _can_predict, reason="Pre-trained SEPIA models or sepia package not available")

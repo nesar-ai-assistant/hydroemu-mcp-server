@@ -145,79 +145,36 @@ def predict_observable(
         sigma_8: Fluctuation amplitude [0.7, 0.9].
         output_dir: Directory for the output CSV.
     """
-    from .emulator import predict, load_models_for_observable, OBSERVABLE_CATALOG
+    from .emulator import (
+        predict,
+        load_training_data,
+        load_models_for_observable,
+        OBSERVABLE_CATALOG,
+    )
 
     catalog = OBSERVABLE_CATALOG[observable]
     input_params = np.array([kappa_w, e_w, m_seed, v_kin, eps_kin, omega_m, sigma_8])
 
-    # Use z=0 snapshot (last index = highest snapshot number = z~0)
-    z_index = catalog["num_snapshots"] - 1
+    # Load bundled training data arrays
+    td = load_training_data(observable)
+    p_train = td["p_train"]
+    y_vals = td["y_vals"]
+    y_ind = td["y_ind"]
+    z_index_range = td["z_index_range"]
 
-    # Load model for the z=0 snapshot
-    # For single-snapshot prediction, we need the model and data
-    # The models are loaded lazily via load_models_for_observable
-    # but that requires training data arrays. For the MCP server,
-    # models are pre-loaded from pickles that contain everything needed.
-    #
-    # SIMPLIFIED: Load the single z=0 model directly
-    from .emulator import (
-        MODELS_DIR,
-        _load_model_autosync,
+    # Load all snapshot models (cached after first call)
+    model_list, data_list = load_models_for_observable(
+        observable,
+        y_vals_all=y_vals,
+        y_ind_all=y_ind,
+        p_train_all=p_train,
+        z_index_range=z_index_range,
     )
-    from sepia.SepiaData import SepiaData
 
-    model_dir = MODELS_DIR / catalog["model_subdir"]
-    model_filename = str(model_dir / f"multivariate_model_z_index{z_index}")
-
-    # For prediction, we need a SepiaModel with restored data.
-    # The pickle contains samples + data, so restore_model_info handles it.
-    # We'll use a dummy SepiaData — the real data comes from the pickle.
-    #
-    # Actually, the standard pattern needs training data to create the PCA
-    # basis. In production, the training data is loaded alongside.
-    # For now, raise a clear error if models aren't available.
-    pkl_path = model_filename + ".pkl"
-    if not Path(pkl_path).exists():
-        raise FileNotFoundError(
-            f"Pre-trained model not found: {pkl_path}. "
-            f"Copy trained SEPIA pickles from CosmoHydro/models/ into "
-            f"{MODELS_DIR}/{catalog['model_subdir']}/."
-        )
-
-    # Load the pickle to extract the saved SepiaData
-    import pickle
-    with open(pkl_path, "rb") as fh:
-        blob = pickle.load(fh)
-
-    # Reconstruct model from pickle
-    import contextlib
-    import io as _io
-    with contextlib.redirect_stdout(_io.StringIO()):
-        # The blob should contain data needed to reconstruct the model
-        # Use the SepiaData from the saved model
-        if "data" in blob:
-            sepia_data = blob["data"]
-        else:
-            raise RuntimeError(
-                f"Pickle {pkl_path} does not contain 'data' key. "
-                "Ensure models are saved with sepia_model.save_model_info()."
-            )
-        sepia_data.transform_xt()
-        sepia_data.standardize_y()
-        n_pc = blob.get("samples", {}).get("betaU", None)
-        if n_pc is not None and hasattr(n_pc, "shape") and n_pc.ndim >= 3:
-            sepia_data.create_K_basis(n_pc=int(n_pc.shape[2]))
-        else:
-            sepia_data.create_K_basis(n_pc=0.95)
-        from sepia.SepiaModel import SepiaModel
-        sepia_model = SepiaModel(sepia_data)
-        sepia_model.restore_model_info(model_filename)
-
-    # Predict
-    y_mean, y_std = predict(sepia_model, input_params, sepia_data=sepia_data)
-
-    # Build output x-values (from model data)
-    x_vals = sepia_data.sim_data.y_ind
+    # Use z=0 snapshot (last in z_index_range)
+    z_index = len(model_list) - 1
+    y_mean, y_std = predict(model_list[z_index], input_params, sepia_data=data_list[z_index])
+    x_vals = y_ind
 
     # Write CSV
     outdir = Path(output_dir).expanduser().resolve()
@@ -301,6 +258,7 @@ def predict_observable_redshift(
     """
     from .emulator import (
         predict_at_redshift,
+        load_training_data,
         load_models_for_observable,
         OBSERVABLE_CATALOG,
         get_snapshot_redshifts,
@@ -317,57 +275,32 @@ def predict_observable_redshift(
 
     input_params = np.array([kappa_w, e_w, m_seed, v_kin, eps_kin, omega_m, sigma_8])
 
+    # Load bundled training data arrays
+    td = load_training_data(observable)
+    p_train = td["p_train"]
+    y_vals = td["y_vals"]
+    y_ind = td["y_ind"]
+    z_index_range = td["z_index_range"]
+
     # Get snapshot redshifts for this observable
     z_all, _ = get_snapshot_redshifts(catalog["snapshot_ids"])
 
-    # Load all snapshot models (lazy, cached)
-    # NOTE: This requires training data arrays — see predict_observable for
-    # the production data-loading pattern. For now, raise if models missing.
-    model_dir = Path(__file__).resolve().parents[1] / "models" / catalog["model_subdir"]
-    first_pkl = model_dir / "multivariate_model_z_index0.pkl"
-    if not first_pkl.exists():
-        raise FileNotFoundError(
-            f"Pre-trained models not found in {model_dir}/. "
-            f"Copy trained SEPIA pickles from CosmoHydro/models/ into "
-            f"the models/ directory."
-        )
-
-    # Load models from pickles (simplified — in production this uses
-    # load_models_for_observable with training data)
-    import pickle
-    import contextlib
-    import io as _io
-    from sepia.SepiaModel import SepiaModel
-    from sepia.SepiaData import SepiaData
-
-    model_list = []
-    data_list = []
-    for z_idx in range(catalog["num_snapshots"]):
-        pkl_path = model_dir / f"multivariate_model_z_index{z_idx}.pkl"
-        with open(pkl_path, "rb") as fh:
-            blob = pickle.load(fh)
-        with contextlib.redirect_stdout(_io.StringIO()):
-            sepia_data = blob["data"]
-            sepia_data.transform_xt()
-            sepia_data.standardize_y()
-            betaU = blob.get("samples", {}).get("betaU", None)
-            if betaU is not None and hasattr(betaU, "shape") and betaU.ndim >= 3:
-                sepia_data.create_K_basis(n_pc=int(betaU.shape[2]))
-            else:
-                sepia_data.create_K_basis(n_pc=0.95)
-            sepia_model = SepiaModel(sepia_data)
-            fname = str(model_dir / f"multivariate_model_z_index{z_idx}")
-            sepia_model.restore_model_info(fname)
-        model_list.append(sepia_model)
-        data_list.append(sepia_data)
+    # Load all snapshot models (cached after first call)
+    model_list, data_list = load_models_for_observable(
+        observable,
+        y_vals_all=y_vals,
+        y_ind_all=y_ind,
+        p_train_all=p_train,
+        z_index_range=z_index_range,
+    )
 
     # Predict with redshift interpolation
     y_mean, y_std = predict_at_redshift(
         input_params, redshift, model_list, data_list, z_all
     )
 
-    # x-values from the last model's data
-    x_vals = data_list[-1].sim_data.y_ind
+    # x-values from the training data
+    x_vals = y_ind
 
     # Write CSV
     outdir = Path(output_dir).expanduser().resolve()

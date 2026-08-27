@@ -16,6 +16,7 @@ __all__ = [
     "PARAMETER_SPACE",
     "SNAPSHOT_IDS",
     "get_snapshot_redshifts",
+    "load_training_data",
     "load_models_for_observable",
     "predict",
     "predict_at_redshift",
@@ -29,6 +30,24 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# Monkey-patch SEPIA for scipy >= 1.14 compatibility
+# scipy.linalg.solve() removed the sym_pos keyword; SEPIA still uses it.
+# We patch scipy.linalg.solve before SEPIA imports it.
+# ---------------------------------------------------------------------------
+import scipy.linalg as _sla
+_orig_solve = _sla.solve
+
+
+def _patched_solve(*args, **kwargs):
+    if "sym_pos" in kwargs:
+        kwargs.pop("sym_pos")
+        kwargs.setdefault("assume_a", "pos")
+    return _orig_solve(*args, **kwargs)
+
+
+_sla.solve = _patched_solve
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -253,6 +272,83 @@ PARAM_NAMES_ORDERED = [
 
 _model_cache: dict[str, tuple[list, list]] = {}
 
+# Training data cache (npz arrays)
+_training_data_cache: dict[str, dict] = {}
+
+
+def load_training_data(observable: str) -> dict:
+    """Load bundled training data arrays from the models/ directory.
+
+    Each observable has a ``training_data.npz`` saved alongside its SEPIA
+    pickles.  The npz contains:
+
+    - ``p_train``: (100, 7) parameter design matrix (training sims only)
+    - ``y_vals``: (100, n_snapshots, n_bins) observable values per snapshot
+    - ``y_ind``: (n_bins,) the x-axis grid (mass bins, radii, k, etc.)
+    - ``z_index_range``: snapshot indices that have trained models
+    - ``redshifts``: redshift for each snapshot
+    - ``param_names``: parameter names in order
+
+    NaN values in ``y_vals`` are filled with linear interpolation along the
+    bin axis (reproducing the CosmoHydro preprocessing step).
+
+    Returns a dict with all arrays.  Results are cached.
+    """
+    if observable in _training_data_cache:
+        return _training_data_cache[observable]
+
+    catalog = OBSERVABLE_CATALOG[observable]
+    npz_path = MODELS_DIR / catalog["model_subdir"] / "training_data.npz"
+    if not npz_path.exists():
+        raise FileNotFoundError(
+            f"Training data not found: {npz_path}. "
+            "Run the export_training_data.py script from CosmoHydro to generate it."
+        )
+
+    data = dict(np.load(npz_path, allow_pickle=False))
+
+    # Fill NaN values in y_vals (cluster profiles may have NaN bins)
+    y_vals = data["y_vals"]
+    if np.isnan(y_vals).any():
+        y_vals = _fill_nan_interpolation(y_vals)
+        data["y_vals"] = y_vals
+
+    _training_data_cache[observable] = data
+    return data
+
+
+def _fill_nan_interpolation(arr: np.ndarray) -> np.ndarray:
+    """Fill NaN values in array by linear interpolation along the last axis.
+
+    Reproduces CosmoHydro's fill_nan_with_interpolation for 2D and 3D arrays.
+    For 3D arrays (n_sims, n_snapshots, n_bins), processes each (sim, snap) slice.
+    """
+    from scipy.interpolate import interp1d
+
+    result = arr.copy()
+    if result.ndim == 2:
+        # (n_sims, n_bins)
+        for i in range(result.shape[0]):
+            row = result[i]
+            mask = ~np.isnan(row)
+            if mask.sum() >= 2 and (~mask).any():
+                x = np.arange(len(row))
+                f = interp1d(x[mask], row[mask], kind="linear",
+                             fill_value="extrapolate", bounds_error=False)
+                result[i] = f(x)
+    elif result.ndim == 3:
+        # (n_sims, n_snapshots, n_bins)
+        for i in range(result.shape[0]):
+            for j in range(result.shape[1]):
+                row = result[i, j]
+                mask = ~np.isnan(row)
+                if mask.sum() >= 2 and (~mask).any():
+                    x = np.arange(len(row))
+                    f = interp1d(x[mask], row[mask], kind="linear",
+                                 fill_value="extrapolate", bounds_error=False)
+                    result[i, j] = f(x)
+    return result
+
 
 def _pu_from_saved_model(model_filename: str) -> Optional[int]:
     """Inspect a saved SEPIA model pickle and return the number of PCA basis
@@ -298,15 +394,25 @@ def load_models_for_observable(
     y_vals_all: np.ndarray,
     y_ind_all: np.ndarray,
     p_train_all: np.ndarray,
+    z_index_range: Optional[np.ndarray] = None,
     exp_variance: float = 0.95,
 ) -> tuple[list, list]:
     """Load all snapshot models for an observable.
 
     Returns (model_list, data_list) — one SepiaModel and SepiaData per
-    snapshot index.
+    snapshot index in z_index_range.
 
     This is the multi-snapshot ``load_model_multiple`` pattern from
     CosmoHydro's emu.py, adapted for the MCP server layout.
+
+    Parameters
+    ----------
+    z_index_range : array-like, optional
+        Global snapshot indices for which trained models exist.  When None,
+        defaults to ``range(num_snapshots)`` (works for GSMF/HMF that have
+        sequential indices 0..10).  For observables like fGas/CGD that only
+        have models at a subset of snapshots (e.g., [4,5,6,...,10]), the
+        caller **must** pass this from ``training_data.npz['z_index_range']``.
     """
     if observable in _model_cache:
         return _model_cache[observable]
@@ -315,16 +421,27 @@ def load_models_for_observable(
 
     catalog = OBSERVABLE_CATALOG[observable]
     model_dir = MODELS_DIR / catalog["model_subdir"]
-    n_snaps = catalog["num_snapshots"]
+
+    if z_index_range is None:
+        z_index_range = np.arange(catalog["num_snapshots"])
 
     model_list = []
     data_list = []
 
-    for z_index in range(n_snaps):
-        # Build SepiaData for this snapshot
+    for local_idx, z_index in enumerate(z_index_range):
+        # y_vals_all may have shape (n_sims, n_all_snapshots, n_bins) with
+        # the snapshot axis matching global snapshot indices, OR it may have
+        # shape (n_sims, len(z_index_range), n_bins) already sliced.
+        # Detect which layout we have by comparing axis-1 size.
+        if y_vals_all.shape[1] > len(z_index_range):
+            # Global layout: index by z_index (the global snapshot number)
+            y_snap = y_vals_all[:, z_index, :]
+        else:
+            # Already sliced to match z_index_range
+            y_snap = y_vals_all[:, local_idx, :]
         sepia_data = SepiaData(
             t_sim=p_train_all,
-            y_sim=y_vals_all[:, z_index, :],
+            y_sim=y_snap,
             y_ind_sim=y_ind_all,
         )
         model_filename = str(

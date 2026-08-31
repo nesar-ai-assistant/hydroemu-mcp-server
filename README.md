@@ -110,6 +110,13 @@ Without models, `list_observables()`, `describe_parameters()`, and
 `plot_observable_comparison()` still work; only `predict_observable` and
 `predict_observable_redshift` require the pickles.
 
+### Related: cosmohydro_emu Python package
+
+The standalone [`cosmohydro_emu`](https://github.com/nesar/cosmohydro_emu)
+package provides the same SEPIA emulators as a pip-installable Python library
+(with additional statistics: Pk suppression, CSFR, and gravity-only Pk).
+This MCP server wraps the same underlying models for agent access.
+
 ## Run the server
 
 **Streamable HTTP** — the server is a visible process with a URL:

@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hydroemu-mcp-server"
-version = "0.1.0"
-description = "MCP server exposing HACC cosmological hydrodynamic simulation emulators."
+version = "0.2.0"
+description = "MCP server exposing HACC cosmological hydrodynamic simulation emulators via cosmohydro_emu."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=1.27,<2",
     "pydantic>=2,<3",
     "numpy",
-    "scipy",
+    "scipy<1.11",
     "matplotlib>=3.8",
-    "sepia @ git+https://github.com/lanl/SEPIA.git",
+    "cosmohydro_emu @ git+https://github.com/nesar/cosmohydro_emu.git",
 ]
 
 [project.optional-dependencies]

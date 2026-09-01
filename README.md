@@ -1,16 +1,19 @@
 # hydroemu-mcp-server
 
 An MCP server that exposes HACC cosmological hydrodynamic simulation
-emulators — pre-trained SEPIA Gaussian Process models — as tools for any
-LLM agent.
+emulators as tools for any LLM agent.
+
+Powered by the [`cosmohydro_emu`](https://github.com/nesar/cosmohydro_emu)
+package — pre-trained SEPIA Gaussian Process models for 14 summary
+statistics from the CRK-HACC CosmoHydro simulation suite.
 
 ## The one idea this repo teaches
 
 > **The science code stays in usual Python. The MCP wrapper only publishes it.**
 
 - `tools/` is an ordinary science package. It never imports MCP. The emulator
-  tools live in `tools/hydro_tools.py`; the core SEPIA wrapper is in
-  `tools/emulator.py`.
+  tools live in `tools/hydro_tools.py`; the emulator backend is provided by
+  the `cosmohydro_emu` package (lazily imported inside each tool function).
 - `mcp_server/` is a ~70-line generic wrapper. It reads one line of config from
   `pyproject.toml`, imports the science package, and registers every function
   listed in its `__all__` as an MCP tool.
@@ -28,9 +31,7 @@ in `__all__`, done.
 ## Layout
 
 ```
-models/                           Pre-trained SEPIA pickles (copy from CosmoHydro/models/)
 tools/
-  emulator.py                    Core SEPIA wrapper: lazy load, predict, redshift interpolation
   hydro_tools.py                 The 5 MCP tool functions + ArtifactResult contract
   __init__.py                    __all__ — ONLY these names become tools
 mcp_server/                      Generic drop-in wrapper (FastMCP)
@@ -40,15 +41,16 @@ docs/mcp-clients.md              Multi-client setup guide
 
 ## Parameters
 
-7 parameters total (5 subgrid + 2 cosmology):
+Most statistics use 7 parameters (5 subgrid + 2 cosmology). Gravity-only
+statistics (Pk_GO) use only the 2 cosmology parameters.
 
 | Parameter | Symbol | Range | Units |
 |-----------|--------|-------|-------|
-| AGN wind coupling | κ_w | [0.03, 3.0] | — |
-| AGN energy efficiency | e_w | [0.001, 0.1] | — |
-| BH seed mass | M_seed | [0.5, 50.0] | 10⁶ M☉ |
-| Kinetic feedback velocity | v_kin | [0.1, 1.0] | 10⁴ km/s |
-| Kinetic feedback efficiency | ε_kin | [0.1, 1.0] | 10¹ |
+| AGN wind coupling | κ_w | [2.0, 4.0] | — |
+| AGN energy efficiency | e_w | [0.2, 1.0] | — |
+| BH seed mass | M_seed | [0.6, 2.0] | 10⁶ M☉ |
+| Kinetic feedback velocity | v_kin | [0.1, 1.2] | 10⁴ km/s |
+| Kinetic feedback efficiency | ε_kin | [0.02, 1.2] | 10¹ |
 | Matter density | ω_m | [0.12, 0.155] | — |
 | Fluctuation amplitude | σ₈ | [0.7, 0.9] | — |
 
@@ -56,29 +58,32 @@ Design: 110 simulations (400 Mpc/h boxes) from a Latin hypercube design.
 
 ## Observables
 
-| Observable | Description | Snapshots | z range |
-|------------|-------------|-----------|---------|
-| GSMF | Galaxy Stellar Mass Function | 11 | 0–2 |
-| HMF | Halo Mass Function | 11 | 0–2 |
-| fGas | Cluster Gas Fraction | 7 | 0–1.0 |
-| CGD | Cluster Gas Density Profile | 5 | 0–0.5 |
-| CGED | Cluster Gas Electron Density Profile | 5 | 0–0.5 |
-| CPP | Cluster Gas Pressure Profile | 5 | 0–0.5 |
-| CTP | Cluster Gas Temperature Profile | 5 | 0–0.5 |
-| CEP | Cluster Gas Entropy Profile | 5 | 0–0.5 |
-| CEEP | Cluster Electron Entropy Profile | 5 | 0–0.5 |
-| CMP | Cluster Gas Metallicity Profile | 5 | 0–0.5 |
-| CYP | Cluster Compton-y (tSZ) Profile | 5 | 0–0.5 |
+| Observable | Description | Category | Params | z range |
+|------------|-------------|----------|--------|---------|
+| GSMF | Galaxy Stellar Mass Function | summary | 7 | 0–2 |
+| HMF | Halo Mass Function | summary | 7 | 0–2 |
+| fGas | Cluster Gas Fraction | summary | 7 | 0–1.0 |
+| Pk-ratio | Matter Power Spectrum Suppression | summary | 7 | 0–2 |
+| CSFR | Cosmic Star Formation Rate | summary | 7 | single |
+| CGD | Cluster Gas Density Profile | profile | 7 | 0–0.5 |
+| CGED | Cluster Gas Electron Density Profile | profile | 7 | 0–0.5 |
+| CPP | Cluster Gas Pressure Profile | profile | 7 | 0–0.5 |
+| CTP | Cluster Gas Temperature Profile | profile | 7 | 0–0.5 |
+| CEP | Cluster Gas Entropy Profile | profile | 7 | 0–0.5 |
+| CEEP | Cluster Electron Entropy Profile | profile | 7 | 0–0.5 |
+| CMP | Cluster Gas Metallicity Profile | profile | 7 | 0–0.5 |
+| CYP | Cluster Compton-y (tSZ) Profile | profile | 7 | 0–0.5 |
+| Pk_GO | Gravity-Only Matter Power Spectrum | gravity_only | 2 | 0–2 |
 
 ## Tools
 
 | tool | what it does |
 |------|-------------|
-| `list_observables()` | list all 11 emulated observables with metadata |
-| `describe_parameters()` | the 7-parameter design space with ranges |
-| `predict_observable(...)` | predict any observable at z=0, write CSV |
-| `predict_observable_redshift(...)` | predict at arbitrary z (interpolated) |
-| `plot_observable_comparison(...)` | two-panel figure: observable + ratio |
+| `list_observables()` | list all 14 emulated observables with metadata |
+| `describe_parameters(stat_name?)` | parameter space with ranges (7 or 2 depending on stat) |
+| `predict_observable(stat_name, params..., z)` | predict any observable at any z, write CSV |
+| `plot_prediction(stat_name, params..., z)` | single-panel plot with 2σ uncertainty band |
+| `plot_observable_comparison(files, stat_name)` | two-panel figure: observable + ratio |
 
 Two conventions worth copying into any science MCP server:
 
@@ -89,26 +94,15 @@ Two conventions worth copying into any science MCP server:
 ## Install
 
 ```bash
-conda create -n hydroemu python=3.12 -y
-conda activate hydroemu
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                        # tests pass without SEPIA models (fixture data)
+pytest                        # tests pass — fixture data for plots, real models for predictions
 ```
 
-### Pre-trained models
-
-Copy the trained SEPIA pickles from `CosmoHydro/models/` into the `models/`
-directory:
-
-```bash
-cp -r /path/to/CosmoHydro/models/GSMF_multiz models/
-cp -r /path/to/CosmoHydro/models/HMF_multiz models/
-# ... etc for each observable
-```
-
-Without models, `list_observables()`, `describe_parameters()`, and
-`plot_observable_comparison()` still work; only `predict_observable` and
-`predict_observable_redshift` require the pickles.
+The `cosmohydro_emu` package (and its SEPIA GP backend) is installed
+automatically as a dependency. All trained models are shipped inside
+`cosmohydro_emu` — no manual model copying needed.
 
 ### Related: cosmohydro_emu Python package
 
@@ -139,20 +133,21 @@ a checked-in `.mcp.json` already wires it into Claude Code.
 This server follows the same architecture as
 [spectra-mcp-server](https://github.com/HEP-KE/spectra-mcp-server):
 
-## Emulator Plots
-
-See the [full gallery](docs/GALLERY.md) for 24 validation, sensitivity, and
-comparison plots from the CosmoHydro training notebooks. Highlights:
-
-| | |
-|---|---|
-| ![GSMF Validation](docs/plots/emu_GSMF_multiz_valid_1.png) | ![Pk Sensitivity](docs/plots/emu_Pk_sensi.png) |
-| GSMF: emulator vs held-out simulations | P(k) suppression: per-parameter sensitivity |
-
-## Architecture (detailed)
-
 - `mcp_server/` is a **generic drop-in** MCP wrapper (copy between repos)
 - `tools/` contains the domain-specific science functions
 - `pyproject.toml` `[tool.mcp-server]` config wires them together
-- All SEPIA imports are **lazy** (inside functions, not at module scope)
-- Models are loaded on first use and cached for subsequent calls
+- All `cosmohydro_emu` imports are **lazy** (inside functions, not at module scope)
+- Emulators are loaded on first use per tool call
+
+## Emulator Package
+
+The emulator backend is [`cosmohydro_emu`](https://github.com/nesar/cosmohydro_emu),
+which ships:
+
+- Pre-trained SEPIA GP models for all 14 statistics
+- Training data arrays (parameter designs, x-grids, redshifts)
+- Metadata registry (plot info, parameter ranges, output transforms)
+- Redshift interpolation between trained snapshot models
+
+See the [cosmohydro_emu documentation](https://github.com/nesar/cosmohydro_emu)
+for the full Python API.

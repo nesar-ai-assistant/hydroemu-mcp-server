@@ -112,6 +112,30 @@ def test_describe_parameters_has_ranges():
         assert info["min"] < info["max"]
 
 
+@_skip_no_emu
+def test_describe_parameters_exposes_fiducial():
+    """describe_parameters must surface cosmohydro_emu's calibrated fiducial
+    design point so agents don't fall back to the range midpoint (which is
+    off by ~3% in omega_m and ~1.3% in sigma_8). Regression test for the
+    silent-correctness bug reported in issue #1."""
+    from tools import describe_parameters
+
+    result = describe_parameters()
+    assert "fiducial" in result.metadata
+    fiducial = result.metadata["fiducial"]
+    assert "omega_m" in fiducial
+    assert "sigma_8" in fiducial
+
+    params = result.metadata["parameters"]
+    assert params["omega_m"]["fiducial"] == fiducial["omega_m"]
+    assert params["sigma_8"]["fiducial"] == fiducial["sigma_8"]
+
+    # Fiducial must not equal the naive range midpoint (that's the bug).
+    lo, hi = params["omega_m"]["min"], params["omega_m"]["max"]
+    midpoint = (lo + hi) / 2
+    assert fiducial["omega_m"] != midpoint
+
+
 # ---------------------------------------------------------------------------
 # Fixture CSV helpers for plot tests
 # ---------------------------------------------------------------------------

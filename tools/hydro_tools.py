@@ -114,7 +114,12 @@ def describe_parameters(
 
     Returns the subgrid parameters (kappa_w, e_w, M_seed, v_kin, epsilon_kin)
     and cosmology parameters (omega_m, sigma_8) with their physical
-    descriptions, LaTeX symbols, design ranges, and scaling factors.
+    descriptions, LaTeX symbols, design ranges, scaling factors, and — where
+    documented by cosmohydro_emu — the literature-calibrated fiducial value
+    (e.g. omega_m=0.14176, sigma_8=0.8102). Use the fiducial value, not the
+    range midpoint, when a caller asks to evaluate "at the fiducial" design
+    point: the midpoint is off by ~3% in omega_m and ~1.3% in sigma_8 from the
+    calibrated fiducial and is not a substitute for it.
 
     Use these ranges when calling predict_observable — values outside the
     design will trigger extrapolation warnings.
@@ -126,6 +131,7 @@ def describe_parameters(
     from cosmohydro_emu import get_parameter_info
 
     pinfo = get_parameter_info(stat_name)
+    fiducial = pinfo.get("fiducial", {})
     params = {}
     for name in pinfo["names"]:
         lo, hi = pinfo["ranges"][name]
@@ -136,6 +142,8 @@ def describe_parameters(
         }
         if name in pinfo.get("scales", {}):
             params[name]["scale"] = pinfo["scales"][name]
+        if name in fiducial:
+            params[name]["fiducial"] = fiducial[name]
 
     label = stat_name or "all statistics"
     return ArtifactResult(
@@ -149,6 +157,7 @@ def describe_parameters(
             "parameters": params,
             "parameter_order": pinfo["names"],
             "latex_names": pinfo["latex_names"],
+            "fiducial": fiducial,
             "num_simulations": 110,
             "box_size": "400 Mpc/h",
         },
